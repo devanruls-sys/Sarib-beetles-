@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Cyberpunk Scarab World with Bloom & Interaction</title>
+  <title>Cyberpunk Scarab Swarm - Interactive Modes</title>
   <style>
     body { margin:0; overflow:hidden; background:#000; }
     canvas { display:block; }
@@ -22,142 +22,249 @@
 
 <script type="module">
   import * as THREE from 'three';
-  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
   import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
   import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
   import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
-  class CyberpunkWorld {
-    constructor() {
-      this.scene = new THREE.Scene();
-      this.scene.fog = new THREE.FogExp2(0x0a0015, 0.07);
+  // ── Globals ────────────────────────────────────────────────────────
+  let scene, camera, renderer, composer, bloomPass;
+  let scarabs = [];
+  let currentMode = 'RANDOM';   // RANDOM | DANCE | VORTEX | DEVOUR | IDLE
+  let isStandby = false;
+  let targetPoint = new THREE.Vector3();
+  let clickCount = 0;
+  let clickTimer = null;
+  let holdTimer = null;
 
-      this.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 200);
-      this.camera.position.set(0, 4, 12);
+  // Bloom color cycling
+  const bloomColors = [0x00ffff, 0xff00ff, 0x00ff99, 0xffaa00, 0xff0066];
+  let bloomColorIndex = 0;
 
-      this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
-      this.renderer.setPixelRatio(devicePixelRatio * 0.9);
-      this.renderer.setSize(innerWidth, innerHeight);
-      this.renderer.toneMapping = THREE.ReinhardToneMapping;
-      this.renderer.toneMappingExposure = 1.15;
-      document.body.appendChild(this.renderer.domElement);
+  // ── Setup ──────────────────────────────────────────────────────────
+  function init() {
+    scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x0a0015, 0.08);
 
-      // Post-processing
-      this.composer = new EffectComposer(this.renderer);
-      const renderPass = new RenderPass(this.scene, this.camera);
-      this.composer.addPass(renderPass);
+    camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 200);
+    camera.position.set(0, 4, 14);
 
-      const bloomPass = new UnrealBloomPass(
-        new THREE.Vector2(innerWidth, innerHeight),
-        1.7,    // strength — higher = bigger/more intense glow
-        0.45,   // radius — spread of glow
-        0.2     // threshold — lower = more things glow (good for neon/emissive)
+    renderer = new THREE.WebGLRenderer({ antialias: false });
+    renderer.setPixelRatio(devicePixelRatio);
+    renderer.setSize(innerWidth, innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Post-processing
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 1.7, 0.45, 0.2);
+    composer.addPass(bloomPass);
+
+    // Lights
+    scene.add(new THREE.AmbientLight(0x404060, 0.6));
+    const neonBlue = new THREE.PointLight(0x00f0ff, 40, 80); neonBlue.position.set(10, 8, 10); scene.add(neonBlue);
+
+    // Create scarabs (simple cones as before - replace with GLTF later)
+    const beetleGeo = new THREE.ConeGeometry(0.18, 0.55, 4);
+    const beetleMat = new THREE.MeshStandardMaterial({
+      color: 0x00ffcc,
+      emissive: 0x00ffcc,
+      emissiveIntensity: 8,
+      metalness: 0.85,
+      roughness: 0.12
+    });
+
+    for (let i = 0; i < 50; i++) {
+      const s = new THREE.Mesh(beetleGeo, beetleMat.clone());
+      s.position.set(
+        (Math.random() - 0.5) * 20,
+        (Math.random() - 0.5) * 15,
+        (Math.random() - 0.5) * 20
       );
-      this.composer.addPass(bloomPass);
-
-      // Controls
-      this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-      this.controls.enableDamping = true;
-      this.controls.dampingFactor = 0.05;
-
-      // Lights (cyberpunk neon)
-      this.scene.add(new THREE.AmbientLight(0x404060, 0.5));
-
-      const blue = new THREE.PointLight(0x00f0ff, 40, 80); blue.position.set(10, 8, 10); this.scene.add(blue);
-      const pink = new THREE.PointLight(0xff00cc, 35, 80); pink.position.set(-10, 10, 5); this.scene.add(pink);
-
-      // Example scarab group (replace with your swarm logic)
-      this.scarabGroup = new THREE.Group();
-      this.scene.add(this.scarabGroup);
-
-      // Example "core" object that can be clicked
-      const coreGeo = new THREE.OctahedronGeometry(1.2, 0);
-      const coreMat = new THREE.MeshStandardMaterial({
-        color: 0x00ffcc,
-        emissive: 0x00ffcc,
-        emissiveIntensity: 12,          // high value → strong bloom
-        metalness: 0.9,
-        roughness: 0.1
-      });
-      this.core = new THREE.Mesh(coreGeo, coreMat);
-      this.core.name = "core";
-      this.core.position.set(0, 0, 0);
-      this.scarabGroup.add(this.core);
-
-      // Raycaster setup
-      this.raycaster = new THREE.Raycaster();
-      this.pointer = new THREE.Vector2();
-
-      // Event listeners
-      window.addEventListener('resize', () => this.onResize());
-      window.addEventListener('click', (e) => this.onClick(e));
-
-      this.time = 0;
-      this.render();
+      s.userData = { velocity: new THREE.Vector3(
+        (Math.random() - 0.5) * 0.07,
+        (Math.random() - 0.5) * 0.06,
+        (Math.random() - 0.5) * 0.07
+      ), phase: Math.random() * Math.PI * 2 };
+      scene.add(s);
+      scarabs.push(s);
     }
 
-    onResize() {
-      this.camera.aspect = innerWidth / innerHeight;
-      this.camera.updateProjectionMatrix();
-      this.renderer.setSize(innerWidth, innerHeight);
-      this.composer.setSize(innerWidth, innerHeight);
-    }
+    // Input handling
+    renderer.domElement.addEventListener('mousedown', handleInput);
+    renderer.domElement.addEventListener('mouseup', () => clearTimeout(holdTimer));
 
-    onClick(event) {
-      // Normalize mouse coords (-1 to +1)
-      this.pointer.x = (event.clientX / innerWidth) * 2 - 1;
-      this.pointer.y = -(event.clientY / innerHeight) * 2 + 1;
+    // Audio (starts after user interaction)
+    document.addEventListener('click', initAudio, { once: true });
 
-      this.raycaster.setFromCamera(this.pointer, this.camera);
+    // Cadaver spawn every 30s
+    setInterval(spawnCadaver, 30000);
 
-      // recursive: true → checks children too (important for groups/models)
-      const intersects = this.raycaster.intersectObjects(this.scene.children, true);
+    animate();
+  }
 
-      if (intersects.length > 0) {
-        const hit = intersects[0].object;
-        if (hit.name === "core") {
-          // Trigger meltdown visuals
-          hit.material.emissive.setHex(0xff0000);     // bright red
-          hit.material.emissiveIntensity = 25;        // extreme glow
-          hit.material.color.setHex(0xff3333);
+  // ── Input Handling ─────────────────────────────────────────────────
+  function handleInput(event) {
+    // Hold (2s → Dance mode)
+    holdTimer = setTimeout(() => {
+      currentMode = 'DANCE';
+      console.log("Mode: DANCE (hold)");
+    }, 2000);
 
-          console.log("CRITICAL CORE DAMAGE — MELTDOWN INITIATED");
+    // Click counting
+    clickCount++;
+    clearTimeout(clickTimer);
 
-          // Optional: pulse animation or particles later
-        }
+    clickTimer = setTimeout(() => {
+      if (clickCount === 1) {
+        changeBloomColor();
+        console.log("Single click: Bloom color cycle");
+      } else if (clickCount === 2) {
+        currentMode = 'VORTEX';
+        console.log("Double click: VORTEX mode");
+      } else if (clickCount === 3) {
+        isStandby = !isStandby;
+        currentMode = isStandby ? 'IDLE' : 'RANDOM';
+        console.log(`Triple click: Standby ${isStandby ? 'ON' : 'OFF'}`);
       }
-    }
+      clickCount = 0;
+    }, 300);
+  }
 
-    animateScarab(time) {
-      // Your scarab swarm logic here — example simple rotation + bob
-      this.scarabGroup.rotation.y = time * 0.0003;
-      this.scarabGroup.position.y = Math.sin(time * 0.001) * 0.4;
+  function changeBloomColor() {
+    bloomColorIndex = (bloomColorIndex + 1) % bloomColors.length;
+    const col = new THREE.Color(bloomColors[bloomColorIndex]);
+    scarabs.forEach(s => {
+      if (s.material.emissive) s.material.emissive.copy(col);
+    });
+    // Optional: tint bloomPass somehow (not direct, but you can tint via shader later)
+  }
 
-      // If you have many scarabs:
-      // this.scarabGroup.children.forEach((b, i) => {
-      //   b.rotation.x += 0.02 + Math.sin(time * 0.003 + i) * 0.01;
-      //   ...
-      // });
-    }
+  // ── Audio Reactivity ───────────────────────────────────────────────
+  let audioContext, analyzer, dataArray;
 
-    render() {
-      const time = performance.now();
+  async function initAudio() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioContext.createMediaStreamSource(stream);
+      analyzer = audioContext.createAnalyser();
+      analyzer.fftSize = 256; // smaller for performance
+      source.connect(analyzer);
 
-      requestAnimationFrame(() => this.render());
-
-      if (this.scarabGroup) {
-        this.animateScarab(time);
-      }
-
-      this.controls.update();
-
-      this.composer.render();  // ← uses bloom
-      // Do NOT use this.renderer.render() here if you want bloom
+      dataArray = new Uint8Array(analyzer.frequencyBinCount);
+      console.log("Microphone audio active – scarabs react to bass!");
+    } catch (err) {
+      console.error("Mic access denied:", err);
     }
   }
 
-  // Start the world
-  new CyberpunkWorld();
-</script>
-</body>
-</html>
+  function updateAudio() {
+    if (!analyzer) return;
+
+    analyzer.getByteFrequencyData(dataArray);
+
+    // Bass emphasis: average low frequencies (indices 0–15 ≈ 20–200 Hz)
+    let bassSum = 0;
+    for (let i = 0; i < 16; i++) bassSum += dataArray[i];
+    const bass = (bassSum / 16 / 255); // 0–1
+
+    // Overall volume
+    let total = 0;
+    for (let val of dataArray) total += val;
+    const volume = (total / dataArray.length / 255);
+
+    scarabs.forEach(s => {
+      // Glow pulse
+      s.material.emissiveIntensity = 4 + volume * 12 + bass * 8;
+
+      if (currentMode === 'DANCE') {
+        s.position.y += bass * 0.8; // bounce on bass
+        s.rotation.x += bass * 0.2;
+      }
+    });
+  }
+
+  // ── Cadaver Spawn & Devour ─────────────────────────────────────────
+  let cadaverGeo = new THREE.BoxGeometry(2, 0.5, 4); // placeholder corpse
+  let cadaverMat = new THREE.MeshStandardMaterial({ color: 0x880000, emissive: 0x440000 });
+
+  function spawnCadaver() {
+    if (currentMode === 'DEVOUR') return; // avoid overlap
+
+    const body = new THREE.Mesh(cadaverGeo, cadaverMat);
+    body.position.set(
+      (Math.random() - 0.5) * 10,
+      20,
+      (Math.random() - 0.5) * 10
+    );
+    scene.add(body);
+
+    function fall() {
+      body.position.y -= 0.15;
+
+      if (body.position.y <= 0) {
+        currentMode = 'DEVOUR';
+        targetPoint.copy(body.position);
+        console.log("CADAVER DOWN – DEVOUR mode!");
+
+        // Scarabs swarm to target over 3s
+        setTimeout(() => {
+          scene.remove(body);
+          currentMode = 'RANDOM';
+        }, 3000);
+      } else {
+        requestAnimationFrame(fall);
+      }
+    }
+    fall();
+  }
+
+  // ── Animation Loop ─────────────────────────────────────────────────
+  function animate() {
+    requestAnimationFrame(animate);
+
+    const time = performance.now() * 0.001;
+
+    updateAudio();
+
+    scarabs.forEach((s, i) => {
+      if (isStandby) {
+        s.material.emissiveIntensity = 0.5;
+        return;
+      }
+
+      // Base flight
+      s.position.add(s.userData.velocity);
+
+      // Organic wobble
+      s.position.y += Math.sin(time * 4 + s.userData.phase) * 0.01;
+      s.rotation.x += 0.04;
+      s.rotation.z += 0.02;
+
+      // Mode behaviors
+      if (currentMode === 'VORTEX') {
+        const dir = new THREE.Vector3().subVectors(new THREE.Vector3(), s.position).normalize();
+        s.userData.velocity.lerp(dir.multiplyScalar(0.08), 0.02);
+      } else if (currentMode === 'DEVOUR') {
+        const dir = new THREE.Vector3().subVectors(targetPoint, s.position).normalize();
+        s.userData.velocity.lerp(dir.multiplyScalar(0.15), 0.05);
+      } else if (currentMode === 'RANDOM' || currentMode === 'IDLE') {
+        // gentle random drift
+        s.userData.velocity.lerp(new THREE.Vector3(
+          (Math.random() - 0.5) * 0.03,
+          (Math.random() - 0.5) * 0.02,
+          (Math.random() - 0.5) * 0.03
+        ), 0.01);
+      }
+
+      // Boundaries
+      const bound = 15;
+      if (Math.abs(s.position.x) > bound) s.userData.velocity.x *= -0.9;
+      if (Math.abs(s.position.y) > bound) s.userData.velocity.y *= -0.9;
+      if (Math.abs(s.position.z) > bound) s.userData.velocity.z *= -0.9;
+    });
+
+    // Gentle camera orbit
+    camera.position.x = Math.sin(time * 0.12) * 5;
+    camera.position.z = 14
