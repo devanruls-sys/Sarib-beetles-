@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyberpunk Scarab Swarm - Neon Glow</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; font-family: Arial, sans-serif; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px; left: 10px;
+            color: #0ff;
+            font-size: 14px;
+            pointer-events: none;
+            text-shadow: 0 0 4px #000;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Cyberpunk Scarab Swarm • Press F11 for fullscreen</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+        // ── Scene Setup ────────────────────────────────────────────────
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x0a0015, 0.08); // Deep cyberpunk purple haze
+
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 200);
+        camera.position.set(0, 2, 12);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+        renderer.setPixelRatio(window.devicePixelRatio * 0.92); // slight perf boost
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ReinhardToneMapping;
+        renderer.toneMappingExposure = 1.1;
+        document.body.appendChild(renderer.domElement);
+
+        // ── Post-Processing ────────────────────────────────────────────
+        const renderPass = new RenderPass(scene, camera);
+        const bloomPass = new UnrealBloomPass(
+            new THREE.Vector2(window.innerWidth, window.innerHeight),
+            1.9,    // strength
+            0.45,   // radius
+            0.15    // threshold — low = more things glow
+        );
+
+        const composer = new EffectComposer(renderer);
+        composer.addPass(renderPass);
+        composer.addPass(bloomPass);
+
+        // ── Lighting ───────────────────────────────────────────────────
+        scene.add(new THREE.AmbientLight(0x202040, 0.6));
+
+        const neonBlue   = new THREE.PointLight(0x00f0ff, 40, 60); neonBlue.position.set( 8,  6, 10); scene.add(neonBlue);
+        const neonPink   = new THREE.PointLight(0xff00aa, 35, 60); neonPink.position.set(-8,  8,  8); scene.add(neonPink);
+        const neonGreen  = new THREE.PointLight(0x00ff99, 30, 50); neonGreen.position.set( 0, -4, 12); scene.add(neonGreen);
+
+        // ── Scarab Swarm ───────────────────────────────────────────────
+        const beetleCount = 50;
+        const beetles = [];
+        const loader = new GLTFLoader();
+
+        // Placeholder geometry & material (used if model fails to load)
+        const fallbackGeo = new THREE.ConeGeometry(0.18, 0.55, 4, 1);
+        const fallbackMat = new THREE.MeshStandardMaterial({
+            color: 0x00ffcc,
+            emissive: 0x00ffcc,
+            emissiveIntensity: 8,
+            metalness: 0.85,
+            roughness: 0.12
+        });
+
+        let useFallback = true;
+
+        // Try to load real model (change this URL!)
+        loader.load(
+            'https://example.com/cyber-scarab.glb',   // ← Replace with your hosted .glb URL
+            (gltf) => {
+                const model = gltf.scene;
+                useFallback = false;
+
+                // Normalize & style the loaded model
+                model.traverse(child => {
+                    if (child.isMesh) {
+                        child.material = new THREE.MeshStandardMaterial({
+                            color: 0x00ffdd,
+                            emissive: 0x00ffdd,
+                            emissiveIntensity: 7,
+                            metalness: 0.9,
+                            roughness: 0.1
+                        });
+                    }
+                });
+
+                model.scale.setScalar(0.45); // ← tune scale depending on model
+
+                // Create instances
+                for (let i = 0; i < beetleCount; i++) {
+                    const beetle = model.clone();
+                    initBeetle(beetle, i);
+                    scene.add(beetle);
+                    beetles.push(beetle);
+                }
+                console.log("Cyber-scarab model loaded successfully!");
+            },
+            undefined,
+            (err) => {
+                console.warn("Model load failed — using fallback geometry", err);
+                // Fallback loop
+                for (let i = 0; i < beetleCount; i++) {
+                    const beetle = new THREE.Mesh(fallbackGeo, fallbackMat);
+                    initBeetle(beetle, i);
+                    scene.add(beetle);
+                    beetles.push(beetle);
+                }
+            }
+        );
+
+        function initBeetle(beetle, index) {
+            beetle.position.set(
+                (Math.random() - 0.5) * 24,
+                (Math.random() - 0.5) * 18,
+                (Math.random() - 0.5) * 24
+            );
+
+            beetle.userData = {
+                velocity: new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.07,
+                    (Math.random() - 0.5) * 0.06,
+                    (Math.random() - 0.5) * 0.07
+                ),
+                phase: Math.random() * Math.PI * 2,
+                spinSpeed: 0.03 + Math.random() * 0.04
+            };
+        }
+
+        // ── Animation ──────────────────────────────────────────────────
+        let time = 0;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            time += 0.016;
+
+            beetles.forEach((b, i) => {
+                // Core movement
+                b.position.add(b.userData.velocity);
+
+                // Organic flutter & buzz
+                b.position.y += Math.sin(time * 4 + b.userData.phase) * 0.012;
+                b.position.x += Math.cos(time * 2.3 + b.userData.phase * 1.4) * 0.006;
+
+                // Rotation (tumbling flight)
+                b.rotation.x += b.userData.spinSpeed * (1 + Math.sin(time * 3 + i) * 0.4);
+                b.rotation.z += 0.025 + Math.sin(time * 1.1 + i * 2) * 0.015;
+                b.rotation.y += 0.01;
+
+                // Soft boundary reflection
+                const bound = 14;
+                if (Math.abs(b.position.x) > bound) b.userData.velocity.x *= -0.88;
+                if (Math.abs(b.position.y) > bound * 0.8) b.userData.velocity.y *= -0.9;
+                if (Math.abs(b.position.z) > bound) b.userData.velocity.z *= -0.88;
+            });
+
+            // Gentle orbiting camera
+            camera.position.x = Math.sin(time * 0.15) * 4;
+            camera.position.y = Math.cos(time * 0.11) * 2 + 2;
+            camera.lookAt(0, 0, 0);
+
+            composer.render();
+        }
+
+        // ── Resize Handler ─────────────────────────────────────────────
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start animation even if models are still loading
+        animate();
+    </script>
+</body>
+</html>
