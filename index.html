@@ -1,270 +1,265 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Cyberpunk Scarab Swarm - Interactive Modes</title>
-  <style>
-    body { margin:0; overflow:hidden; background:#000; }
-    canvas { display:block; }
-  </style>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Cyberpunk Scarab Hive - SYSTEM ACTIVE</title>
+    <style>
+        body { margin:0; overflow:hidden; background:#000; font-family: 'Courier New', monospace; }
+        canvas { display:block; }
+        
+        #hud {
+            position: fixed; top: 20px; left: 20px; color: #00ffcc; 
+            pointer-events: none; text-transform: uppercase; letter-spacing: 2px;
+            text-shadow: 0 0 8px #00ffcc; line-height: 1.5; font-size: 13px;
+            background: rgba(0, 0, 0, 0.4); padding: 15px; border-left: 2px solid #00ffcc;
+        }
+        
+        #instructions {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            color: rgba(0, 255, 204, 0.6); font-size: 10px; text-transform: uppercase;
+            pointer-events: none; text-align: center;
+        }
+
+        /* Scanline Overlay */
+        body::after {
+            content: " "; display: block; position: absolute; top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 10; background-size: 100% 2px, 3px 100%; pointer-events: none;
+        }
+    </style>
 </head>
 <body>
 
+    <div id="hud">
+        STATUS: INITIALIZING...<br>
+        LINK: NEURAL_STATIC<br>
+        MODE: STANDBY
+    </div>
+
+    <div id="instructions">
+        [CLICK: COLOR] | [DOUBLE-CLICK: VORTEX] | [TRIPLE-CLICK: IDLE] | [HOLD: DANCE]<br>
+        SPEAK/PLAY MUSIC TO TRIGGER GLITCH
+    </div>
+
 <script type="importmap">
 {
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-  }
+    "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
 }
 </script>
 
 <script type="module">
-  import * as THREE from 'three';
-  import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-  import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-  import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { GlitchPass } from 'three/addons/postprocessing/GlitchPass.js';
 
-  // ── Globals ────────────────────────────────────────────────────────
-  let scene, camera, renderer, composer, bloomPass;
-  let scarabs = [];
-  let currentMode = 'RANDOM';   // RANDOM | DANCE | VORTEX | DEVOUR | IDLE
-  let isStandby = false;
-  let targetPoint = new THREE.Vector3();
-  let clickCount = 0;
-  let clickTimer = null;
-  let holdTimer = null;
+// --- GLOBALS ---
+let scene, camera, renderer, composer, bloomPass, glitchPass;
+let scarabs = [];
+let currentMode = 'RANDOM';
+let isStandby = false;
+let targetPoint = new THREE.Vector3();
+let clickCount = 0, clickTimer = null, holdTimer = null;
+const bloomColors = [0x00ffff, 0xff00ff, 0x00ff99, 0xffaa00, 0xff0066];
+let colorIndex = 0;
+let hud = document.getElementById('hud');
 
-  // Bloom color cycling
-  const bloomColors = [0x00ffff, 0xff00ff, 0x00ff99, 0xffaa00, 0xff0066];
-  let bloomColorIndex = 0;
+// Audio
+let audioContext, analyzer, dataArray;
 
-  // ── Setup ──────────────────────────────────────────────────────────
-  function init() {
+// --- INITIALIZATION ---
+function init() {
     scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x0a0015, 0.08);
+    scene.fog = new THREE.FogExp2(0x050010, 0.07);
 
-    camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 200);
-    camera.position.set(0, 4, 14);
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.z = 15;
 
     renderer = new THREE.WebGLRenderer({ antialias: false });
-    renderer.setPixelRatio(devicePixelRatio);
-    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // Post-processing
+    // Post Processing
     composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
 
-    bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 1.7, 0.45, 0.2);
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.1);
     composer.addPass(bloomPass);
 
+    glitchPass = new GlitchPass();
+    glitchPass.enabled = false;
+    composer.addPass(glitchPass);
+
     // Lights
-    scene.add(new THREE.AmbientLight(0x404060, 0.6));
-    const neonBlue = new THREE.PointLight(0x00f0ff, 40, 80); neonBlue.position.set(10, 8, 10); scene.add(neonBlue);
+    const pLight = new THREE.PointLight(0x00ffcc, 20, 50);
+    pLight.position.set(5, 5, 5);
+    scene.add(pLight);
+    scene.add(new THREE.AmbientLight(0x111122));
 
-    // Create scarabs (simple cones as before - replace with GLTF later)
-    const beetleGeo = new THREE.ConeGeometry(0.18, 0.55, 4);
-    const beetleMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffcc,
-      emissive: 0x00ffcc,
-      emissiveIntensity: 8,
-      metalness: 0.85,
-      roughness: 0.12
-    });
-
-    for (let i = 0; i < 50; i++) {
-      const s = new THREE.Mesh(beetleGeo, beetleMat.clone());
-      s.position.set(
-        (Math.random() - 0.5) * 20,
-        (Math.random() - 0.5) * 15,
-        (Math.random() - 0.5) * 20
-      );
-      s.userData = { velocity: new THREE.Vector3(
-        (Math.random() - 0.5) * 0.07,
-        (Math.random() - 0.5) * 0.06,
-        (Math.random() - 0.5) * 0.07
-      ), phase: Math.random() * Math.PI * 2 };
-      scene.add(s);
-      scarabs.push(s);
+    // Spawn Scarabs
+    const geo = new THREE.ConeGeometry(0.2, 0.6, 4);
+    for (let i = 0; i < 60; i++) {
+        const mat = new THREE.MeshStandardMaterial({ 
+            color: 0x00ffcc, 
+            emissive: 0x00ffcc, 
+            emissiveIntensity: 5 
+        });
+        const s = new THREE.Mesh(geo, mat);
+        resetScarab(s);
+        scene.add(s);
+        scarabs.push(s);
     }
 
-    // Input handling
-    renderer.domElement.addEventListener('mousedown', handleInput);
+    // Input
+    renderer.domElement.addEventListener('mousedown', onMouseDown);
     renderer.domElement.addEventListener('mouseup', () => clearTimeout(holdTimer));
-
-    // Audio (starts after user interaction)
+    window.addEventListener('resize', onWindowResize);
+    
+    // Start Logic
     document.addEventListener('click', initAudio, { once: true });
-
-    // Cadaver spawn every 30s
-    setInterval(spawnCadaver, 30000);
-
+    setInterval(spawnCadaver, 15000);
     animate();
-  }
+}
 
-  // ── Input Handling ─────────────────────────────────────────────────
-  function handleInput(event) {
-    // Hold (2s → Dance mode)
-    holdTimer = setTimeout(() => {
-      currentMode = 'DANCE';
-      console.log("Mode: DANCE (hold)");
-    }, 2000);
+function resetScarab(s) {
+    s.position.set((Math.random()-0.5)*20, (Math.random()-0.5)*20, (Math.random()-0.5)*20);
+    s.userData = {
+        vel: new THREE.Vector3((Math.random()-0.5)*0.1, (Math.random()-0.5)*0.1, (Math.random()-0.5)*0.1),
+        phase: Math.random() * Math.PI * 2
+    };
+}
 
-    // Click counting
+// --- INPUT HANDLERS ---
+function onMouseDown() {
+    holdTimer = setTimeout(() => { currentMode = 'DANCE'; }, 800);
     clickCount++;
     clearTimeout(clickTimer);
-
     clickTimer = setTimeout(() => {
-      if (clickCount === 1) {
-        changeBloomColor();
-        console.log("Single click: Bloom color cycle");
-      } else if (clickCount === 2) {
-        currentMode = 'VORTEX';
-        console.log("Double click: VORTEX mode");
-      } else if (clickCount === 3) {
-        isStandby = !isStandby;
-        currentMode = isStandby ? 'IDLE' : 'RANDOM';
-        console.log(`Triple click: Standby ${isStandby ? 'ON' : 'OFF'}`);
-      }
-      clickCount = 0;
+        if (clickCount === 1) cycleColor();
+        else if (clickCount === 2) currentMode = 'VORTEX';
+        else if (clickCount === 3) {
+            isStandby = !isStandby;
+            currentMode = isStandby ? 'IDLE' : 'RANDOM';
+        }
+        clickCount = 0;
     }, 300);
-  }
+}
 
-  function changeBloomColor() {
-    bloomColorIndex = (bloomColorIndex + 1) % bloomColors.length;
-    const col = new THREE.Color(bloomColors[bloomColorIndex]);
-    scarabs.forEach(s => {
-      if (s.material.emissive) s.material.emissive.copy(col);
-    });
-    // Optional: tint bloomPass somehow (not direct, but you can tint via shader later)
-  }
+function cycleColor() {
+    colorIndex = (colorIndex + 1) % bloomColors.length;
+    const newCol = new THREE.Color(bloomColors[colorIndex]);
+    scarabs.forEach(s => s.material.emissive.copy(newCol));
+}
 
-  // ── Audio Reactivity ───────────────────────────────────────────────
-  let audioContext, analyzer, dataArray;
-
-  async function initAudio() {
+// --- AUDIO LOGIC ---
+async function initAudio() {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const source = audioContext.createMediaStreamSource(stream);
-      analyzer = audioContext.createAnalyser();
-      analyzer.fftSize = 256; // smaller for performance
-      source.connect(analyzer);
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioContext = new AudioContext();
+        const source = audioContext.createMediaStreamSource(stream);
+        analyzer = audioContext.createAnalyser();
+        analyzer.fftSize = 256;
+        source.connect(analyzer);
+        dataArray = new Uint8Array(analyzer.frequencyBinCount);
+        hud.innerHTML = "STATUS: NEURAL_LINK_OK";
+    } catch (e) { hud.innerHTML = "STATUS: MIC_ACCESS_DENIED"; }
+}
 
-      dataArray = new Uint8Array(analyzer.frequencyBinCount);
-      console.log("Microphone audio active – scarabs react to bass!");
-    } catch (err) {
-      console.error("Mic access denied:", err);
-    }
-  }
+// --- WORLD EVENTS ---
+function spawnCadaver() {
+    const geo = new THREE.BoxGeometry(1.5, 0.4, 3);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000 });
+    const cadaver = new THREE.Mesh(geo, mat);
+    cadaver.position.set((Math.random()-0.5)*15, 15, (Math.random()-0.5)*15);
+    scene.add(cadaver);
 
-  function updateAudio() {
-    if (!analyzer) return;
+    const fallInterval = setInterval(() => {
+        cadaver.position.y -= 0.15;
+        if (cadaver.position.y <= 0) {
+            clearInterval(fallInterval);
+            targetPoint.copy(cadaver.position);
+            currentMode = 'DEVOUR';
+            setTimeout(() => {
+                scene.remove(cadaver);
+                currentMode = 'RANDOM';
+            }, 4000);
+        }
+    }, 16);
+}
 
-    analyzer.getByteFrequencyData(dataArray);
-
-    // Bass emphasis: average low frequencies (indices 0–15 ≈ 20–200 Hz)
-    let bassSum = 0;
-    for (let i = 0; i < 16; i++) bassSum += dataArray[i];
-    const bass = (bassSum / 16 / 255); // 0–1
-
-    // Overall volume
-    let total = 0;
-    for (let val of dataArray) total += val;
-    const volume = (total / dataArray.length / 255);
-
-    scarabs.forEach(s => {
-      // Glow pulse
-      s.material.emissiveIntensity = 4 + volume * 12 + bass * 8;
-
-      if (currentMode === 'DANCE') {
-        s.position.y += bass * 0.8; // bounce on bass
-        s.rotation.x += bass * 0.2;
-      }
-    });
-  }
-
-  // ── Cadaver Spawn & Devour ─────────────────────────────────────────
-  let cadaverGeo = new THREE.BoxGeometry(2, 0.5, 4); // placeholder corpse
-  let cadaverMat = new THREE.MeshStandardMaterial({ color: 0x880000, emissive: 0x440000 });
-
-  function spawnCadaver() {
-    if (currentMode === 'DEVOUR') return; // avoid overlap
-
-    const body = new THREE.Mesh(cadaverGeo, cadaverMat);
-    body.position.set(
-      (Math.random() - 0.5) * 10,
-      20,
-      (Math.random() - 0.5) * 10
-    );
-    scene.add(body);
-
-    function fall() {
-      body.position.y -= 0.15;
-
-      if (body.position.y <= 0) {
-        currentMode = 'DEVOUR';
-        targetPoint.copy(body.position);
-        console.log("CADAVER DOWN – DEVOUR mode!");
-
-        // Scarabs swarm to target over 3s
-        setTimeout(() => {
-          scene.remove(body);
-          currentMode = 'RANDOM';
-        }, 3000);
-      } else {
-        requestAnimationFrame(fall);
-      }
-    }
-    fall();
-  }
-
-  // ── Animation Loop ─────────────────────────────────────────────────
-  function animate() {
+// --- ANIMATION LOOP ---
+function animate() {
     requestAnimationFrame(animate);
-
     const time = performance.now() * 0.001;
+    
+    // Audio Reactivity
+    let bass = 0;
+    if (analyzer) {
+        analyzer.getByteFrequencyData(dataArray);
+        bass = dataArray[0] / 255;
+        glitchPass.enabled = bass > 0.85;
+        glitchPass.goWild = bass > 0.92;
+    }
 
-    updateAudio();
+    // HUD Update
+    hud.innerHTML = `STATUS: SYSTEM_RUNNING<br>MODE: ${currentMode}<br>BASS_INTENSITY: ${(bass*100).toFixed(0)}%`;
 
     scarabs.forEach((s, i) => {
-      if (isStandby) {
-        s.material.emissiveIntensity = 0.5;
-        return;
-      }
+        if (isStandby) {
+            s.material.emissiveIntensity = 0.5;
+            return;
+        }
 
-      // Base flight
-      s.position.add(s.userData.velocity);
+        // Behavior Logic
+        const distToTarget = s.position.distanceTo(targetPoint);
+        
+        if (currentMode === 'VORTEX') {
+            const orbitDir = new THREE.Vector3().subVectors(new THREE.Vector3(0,0,0), s.position).normalize();
+            const cross = new THREE.Vector3(0,1,0).cross(orbitDir);
+            s.userData.vel.lerp(cross.multiplyScalar(0.2), 0.05);
+        } else if (currentMode === 'DEVOUR') {
+            const flee = new THREE.Vector3().subVectors(targetPoint, s.position).normalize();
+            s.userData.vel.lerp(flee.multiplyScalar(0.3), 0.1);
+            // Jitter near food
+            if (distToTarget < 1) s.position.addScaledVector(new THREE.Vector3(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5), 0.1);
+        } else if (currentMode === 'DANCE') {
+            s.userData.vel.y += Math.sin(time * 10 + i) * 0.02 + (bass * 0.1);
+        }
 
-      // Organic wobble
-      s.position.y += Math.sin(time * 4 + s.userData.phase) * 0.01;
-      s.rotation.x += 0.04;
-      s.rotation.z += 0.02;
+        // Apply Velocity & Boundaries
+        s.position.add(s.userData.vel);
+        if (Math.abs(s.position.x) > 15) s.userData.vel.x *= -1;
+        if (Math.abs(s.position.y) > 15) s.userData.vel.y *= -1;
+        if (Math.abs(s.position.z) > 15) s.userData.vel.z *= -1;
 
-      // Mode behaviors
-      if (currentMode === 'VORTEX') {
-        const dir = new THREE.Vector3().subVectors(new THREE.Vector3(), s.position).normalize();
-        s.userData.velocity.lerp(dir.multiplyScalar(0.08), 0.02);
-      } else if (currentMode === 'DEVOUR') {
-        const dir = new THREE.Vector3().subVectors(targetPoint, s.position).normalize();
-        s.userData.velocity.lerp(dir.multiplyScalar(0.15), 0.05);
-      } else if (currentMode === 'RANDOM' || currentMode === 'IDLE') {
-        // gentle random drift
-        s.userData.velocity.lerp(new THREE.Vector3(
-          (Math.random() - 0.5) * 0.03,
-          (Math.random() - 0.5) * 0.02,
-          (Math.random() - 0.5) * 0.03
-        ), 0.01);
-      }
-
-      // Boundaries
-      const bound = 15;
-      if (Math.abs(s.position.x) > bound) s.userData.velocity.x *= -0.9;
-      if (Math.abs(s.position.y) > bound) s.userData.velocity.y *= -0.9;
-      if (Math.abs(s.position.z) > bound) s.userData.velocity.z *= -0.9;
+        // Visuals
+        s.lookAt(s.position.clone().add(s.userData.vel));
+        s.material.emissiveIntensity = 2 + (bass * 15);
     });
 
-    // Gentle camera orbit
-    camera.position.x = Math.sin(time * 0.12) * 5;
-    camera.position.z = 14
+    // Camera Orbit
+    camera.position.x = Math.sin(time * 0.2) * 18;
+    camera.position.z = Math.cos(time * 0.2) * 18;
+    camera.lookAt(0, 0, 0);
+
+    composer.render();
+}
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    composer.setSize(window.innerWidth, window.innerHeight);
+}
+
+init();
+</script>
+</body>
+</html>
